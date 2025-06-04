@@ -29,8 +29,8 @@ build:
   before_script:
     - docker login -u "${CI_REGISTRY_USER}" -p "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY}"
   script:
-    - docker build -t "${IMAGE_NAME}:${CI_COMMIT_SHA}" .
-    - docker tag "${IMAGE_NAME}:${CI_COMMIT_SHA}" "${IMAGE_NAME}:latest"
+    - docker build -t "${IMAGE_NAME}:${CI_COMMIT_SHA:0:6}" .
+    - docker tag "${IMAGE_NAME}:${CI_COMMIT_SHA:0:6}" "${IMAGE_NAME}:latest"
   only:
     - master
 
@@ -39,7 +39,7 @@ deploy:
   before_script:
     - docker login -u "${CI_REGISTRY_USER}" -p "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY}"
   script:
-    - docker push "${IMAGE_NAME}:${CI_COMMIT_SHA}"
+    - docker push "${IMAGE_NAME}:${CI_COMMIT_SHA:0:6}"
     - docker push "${IMAGE_NAME}:latest"
   needs:
     - build
