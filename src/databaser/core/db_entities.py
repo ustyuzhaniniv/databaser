@@ -12,11 +12,13 @@ from typing import (
     List,
     Optional,
     Set,
-    Tuple,
     Union,
 )
 
 import asyncpg
+from asyncpg.exceptions import (
+    InvalidNameError,
+)
 from asyncpg.pool import (
     Pool,
 )
@@ -50,17 +52,25 @@ from databaser.settings import (
 
 
 class BaseDatabase(object):
-    """
-    Base class for creating databases
+    """Базовый класс для работы с базами данных.
+
+    Предоставляет основные функции для:
+    - Подключения к базе данных
+    - Управления пулом соединений
+    - Получения списка таблиц и секций
+    - Выполнения SQL-запросов
     """
 
     def __init__(
         self,
         db_connection_parameters: DBConnectionParameters,
     ):
-        self.db_connection_parameters: DBConnectionParameters = (
-            db_connection_parameters
-        )
+        """Инициализация базы данных.
+
+        Args:
+            db_connection_parameters: Параметры подключения к базе данных
+        """
+        self.db_connection_parameters: DBConnectionParameters = db_connection_parameters
         self.table_names: Optional[List[str]] = None
         self.partition_names: Optional[List[str]] = None
         self.tables: Optional[Dict[str, DBTable]] = None
@@ -69,12 +79,20 @@ class BaseDatabase(object):
 
     @property
     def connection_str(self) -> str:
-        return CONNECTION_STR_TEMPLATE.format(
-            self.db_connection_parameters
-        )
+        """Получение строки подключения к базе данных.
+
+        Returns:
+            str: Отформатированная строка подключения
+        """
+        return CONNECTION_STR_TEMPLATE.format(self.db_connection_parameters)
 
     @property
     def connection_pool(self) -> Pool:
+        """Получение пула соединений с базой данных.
+
+        Returns:
+            Pool: Активный пул соединений
+        """
         return self._connection_pool
 
     @connection_pool.setter
@@ -82,11 +100,18 @@ class BaseDatabase(object):
         self,
         pool: Pool,
     ):
+        """Установка пула соединений с базой данных.
+
+        Args:
+            pool: Пул соединений для установки
+        """
         self._connection_pool = pool
 
     async def prepare_partition_names(self):
-        """
-        Prepare partitions for exclude their from transferring tables data
+        """Подготовка списка имен секций для исключения их из процесса переноса данных.
+
+        Получает список всех секционированных таблиц в базе данных и сохраняет
+        их имена в self.partition_names.
         """
         select_partition_names_list_sql = SQLRepository.get_select_partition_names_list_sql()
 
@@ -95,16 +120,16 @@ class BaseDatabase(object):
                 query=select_partition_names_list_sql,
             )
 
-            self.partition_names = [
-                partition_name_rec[0]
-                for partition_name_rec in partition_names
-            ]
+            self.partition_names = [partition_name_rec[0] for partition_name_rec in partition_names]
 
     async def prepare_table_names(self):
+        """Подготовка списка имен таблиц базы данных.
+
+        Получает список всех таблиц в базе данных, исключая:
+        - Таблицы из списка EXCLUDED_TABLES
+        - Таблицы, начинающиеся с подчеркивания
         """
-        Preparing database table names list
-        """
-        select_tables_names_list_sql = SQLRepository.get_select_tables_names_list_sql(  # noqa
+        select_tables_names_list_sql = SQLRepository.get_select_tables_names_list_sql(
             excluded_tables=EXCLUDED_TABLES,
         )
 
@@ -113,17 +138,22 @@ class BaseDatabase(object):
                 query=select_tables_names_list_sql,
             )
 
-            self.table_names = [
-                table_name_rec[0]
-                for table_name_rec in table_names
-            ]
+            self.table_names = [table_name_rec[0] for table_name_rec in table_names]
 
     async def execute_raw_sql(
         self,
         raw_sql: str,
     ):
-        """
-        Async executing raw sql
+        """Асинхронное выполнение произвольного SQL-запроса.
+
+        Args:
+            raw_sql: SQL-запрос для выполнения
+
+        Returns:
+            None
+
+        Raises:
+            asyncpg.PostgresError: При ошибке выполнения запроса
         """
         connection = await asyncpg.connect(self.connection_str)
 
@@ -137,8 +167,16 @@ class BaseDatabase(object):
         self,
         raw_sql: str,
     ):
-        """
-        Async executing raw sql with fetching result
+        """Асинхронное выполнение произвольного SQL-запроса с получением результата.
+
+        Args:
+            raw_sql: SQL-запрос для выполнения
+
+        Returns:
+            List[Record]: Список записей с результатами запроса
+
+        Raises:
+            asyncpg.PostgresError: При ошибке выполнения запроса
         """
         connection = await asyncpg.connect(self.connection_str)
 
@@ -152,8 +190,17 @@ class BaseDatabase(object):
         return result
 
     def clear_cache(self):
-        """
-        Clear lru cache
+        """Очистка LRU-кэша для всех кэшируемых свойств таблиц.
+
+        Сбрасывает кэш для следующих свойств:
+        - foreign_keys_columns
+        - self_fk_columns
+        - not_self_fk_columns
+        - fk_columns_with_key_column
+        - unique_fk_columns_with_key_column
+        - fk_columns_tables_with_fk_columns_with_key_column
+        - unique_fk_columns_tables_with_fk_columns_with_key_column
+        - highest_priority_fk_columns
         """
         DBTable.foreign_keys_columns.fget.cache_clear()
         DBTable.self_fk_columns.fget.cache_clear()
@@ -166,14 +213,21 @@ class BaseDatabase(object):
 
 
 class SrcDatabase(BaseDatabase):
-    """
-    Source database
+    """Класс для работы с исходной базой данных.
+
+    Наследует функциональность BaseDatabase и добавляет специфичные
+    методы для работы с базой-источником данных.
     """
 
     def __init__(
         self,
         db_connection_parameters: DBConnectionParameters,
     ):
+        """Инициализация исходной базы данных.
+
+        Args:
+            db_connection_parameters: Параметры подключения к базе данных
+        """
         logger.info('init src database')
 
         super().__init__(
@@ -182,14 +236,25 @@ class SrcDatabase(BaseDatabase):
 
 
 class DstDatabase(BaseDatabase):
-    """
-    Destination database
+    """Класс для работы с целевой базой данных.
+
+    Наследует функциональность BaseDatabase и добавляет специфичные
+    методы для работы с базой-приемником данных, включая:
+    - Подготовку структуры таблиц
+    - Очистку таблиц
+    - Управление триггерами
+    - Обновление последовательностей
     """
 
     def __init__(
         self,
         db_connection_parameters: DBConnectionParameters,
     ):
+        """Инициализация целевой базы данных.
+
+        Args:
+            db_connection_parameters: Параметры подключения к базе данных
+        """
         super().__init__(
             db_connection_parameters=db_connection_parameters,
         )
@@ -199,14 +264,14 @@ class DstDatabase(BaseDatabase):
     @property
     @lru_cache()
     def tables_without_generics(self) -> List['DBTable']:
-        """
-        Getting DB tables without generics
+        """Получение списка таблиц без обобщенных внешних ключей.
+
+        Returns:
+            List[DBTable]: Список таблиц, исключая таблицы из TABLES_WITH_GENERIC_FOREIGN_KEY
         """
         return list(
             filter(
-                lambda t: (
-                    t.name not in TABLES_WITH_GENERIC_FOREIGN_KEY
-                ),
+                lambda t: (t.name not in TABLES_WITH_GENERIC_FOREIGN_KEY),
                 self.tables.values(),
             )
         )
@@ -214,8 +279,10 @@ class DstDatabase(BaseDatabase):
     @property
     @lru_cache()
     def tables_with_key_column(self) -> List['DBTable']:
-        """
-        Getting tables without generics with key column
+        """Получение списка таблиц с ключевой колонкой.
+
+        Returns:
+            List[DBTable]: Список таблиц, содержащих ключевую колонку
         """
         return list(
             filter(
@@ -228,14 +295,18 @@ class DstDatabase(BaseDatabase):
         self,
         chunk_table_names: Iterable[str],
     ):
-        """
-        Preparing tables of chunk table names
+        """Подготовка группы таблиц.
+
+        Создает объекты таблиц и их колонок на основе метаданных из базы данных.
+
+        Args:
+            chunk_table_names: Список имен таблиц для подготовки
         """
         getting_tables_columns_sql = SQLRepository.get_table_columns_sql(
             table_names=make_str_from_iterable(
                 iterable=chunk_table_names,
                 with_quotes=True,
-                quote='\'',
+                quote="'",
             ),
         )
 
@@ -259,7 +330,8 @@ class DstDatabase(BaseDatabase):
                 ordinal_position,
                 constraint_table_name,
                 constraint_type,
-            ) in records if constraint_table_name not in EXCLUDED_TABLES
+            ) in records
+            if constraint_table_name not in EXCLUDED_TABLES
         ]
 
         if coroutines:
@@ -268,8 +340,10 @@ class DstDatabase(BaseDatabase):
         self.clear_cache()
 
     async def prepare_tables(self):
-        """
-        Prepare tables structure for transferring data process
+        """Подготовка всех таблиц базы данных.
+
+        Разбивает список таблиц на группы и асинхронно подготавливает каждую группу.
+        Инициализирует словарь self.tables, где ключи - имена таблиц, значения - объекты DBTable.
         """
         logger.info('prepare tables structure for transferring process')
 
@@ -296,27 +370,27 @@ class DstDatabase(BaseDatabase):
         if coroutines:
             await asyncio.gather(*coroutines)
 
-        logger.info(
-            f'prepare tables progress - {len(self.tables.keys())}/'
-            f'{len(self.table_names)}'
-        )
+        logger.info(f'prepare tables progress - {len(self.tables.keys())}/{len(self.table_names)}')
 
     async def set_max_tables_sequences(self):
-        """
-        Setting max table sequence value as max(id) + 1
+        """Установка максимальных значений последовательностей для всех таблиц.
+
+        Для каждой таблицы с автоинкрементным первичным ключом устанавливает
+        значение последовательности равным максимальному значению в таблице + 1.
         """
         coroutines = [
-            asyncio.create_task(
-                table.set_max_sequence(self._connection_pool)
-            )
-            for table in self.tables.values()
+            asyncio.create_task(table.set_max_sequence(self._connection_pool)) for table in self.tables.values()
         ]
 
-        await asyncio.wait(coroutines)
+        if coroutines:
+            await asyncio.wait(coroutines)
 
     async def prepare_structure(self):
-        """
-        Prepare destination database structure
+        """Подготовка структуры базы данных.
+
+        Последовательно выполняет:
+        1. Подготовку списка имен таблиц
+        2. Подготовку объектов таблиц и их колонок
         """
         await self.prepare_table_names()
 
@@ -325,8 +399,11 @@ class DstDatabase(BaseDatabase):
         logger.info(f'dst database tables count - {len(self.table_names)}')
 
     async def truncate_tables(self):
-        """
-        Truncating tables
+        """Очистка таблиц базы данных.
+
+        Если IS_TRUNCATE_TABLES=True, очищает все таблицы, учитывая:
+        - Список исключенных таблиц (TABLES_TRUNCATE_EXCLUDED)
+        - Список включенных таблиц (TABLES_TRUNCATE_INCLUDED)
         """
         if IS_TRUNCATE_TABLES:
             logger.info('start truncating tables..')
@@ -336,9 +413,7 @@ class DstDatabase(BaseDatabase):
             else:
                 table_names = tuple(
                     filter(
-                        lambda table_name: (
-                            table_name not in TABLES_WITH_GENERIC_FOREIGN_KEY
-                        ),
+                        lambda table_name: (table_name not in TABLES_WITH_GENERIC_FOREIGN_KEY),
                         self.table_names,
                     )
                 )
@@ -346,9 +421,7 @@ class DstDatabase(BaseDatabase):
             if TABLES_TRUNCATE_EXCLUDED:
                 table_names = tuple(
                     filter(
-                        lambda table_name: (
-                            table_name not in TABLES_TRUNCATE_EXCLUDED
-                        ),
+                        lambda table_name: (table_name not in TABLES_TRUNCATE_EXCLUDED),
                         table_names,
                     )
                 )
@@ -363,8 +436,9 @@ class DstDatabase(BaseDatabase):
             logger.info('truncating tables finished.')
 
     async def disable_triggers(self):
-        """
-        Disable database triggers
+        """Отключение всех триггеров в базе данных.
+
+        Устанавливает состояние всех триггеров в 'DISABLED'.
         """
         disable_triggers_sql = SQLRepository.get_disable_triggers_sql()
 
@@ -373,8 +447,9 @@ class DstDatabase(BaseDatabase):
         logger.info('trigger disabled.')
 
     async def enable_triggers(self):
-        """
-        Enable database triggers
+        """Включение всех триггеров в базе данных.
+
+        Устанавливает состояние всех триггеров в 'ORIGIN'.
         """
         enable_triggers_sql = SQLRepository.get_enable_triggers_sql()
 
@@ -384,10 +459,13 @@ class DstDatabase(BaseDatabase):
 
 
 class DBTable(object):
-    """
-    Класс описывающий таблицу БД
+    """Класс для работы с таблицей базы данных.
 
-    Имеет название и поля с типами
+    Предоставляет методы для:
+    - Управления колонками таблицы
+    - Работы с первичными и внешними ключами
+    - Управления последовательностями
+    - Отслеживания процесса переноса данных
     """
 
     __slots__ = (
@@ -410,31 +488,39 @@ class DBTable(object):
     inaccuracy_count = 100
 
     def __init__(self, name):
+        """Инициализация таблицы.
+
+        Args:
+            name: Имя таблицы
+        """
         self.name = name
         self.full_count = 0
         self.max_pk = 0
         self.columns: Dict[str, 'DBColumn'] = {}
 
-        # Table is ready for transferring
+        # Таблица готова к переносу
         self._is_ready_for_transferring = False
 
-        # Table is checked in collecting values process
+        # Таблица проверена в процессе сбора значений
         self._is_checked: bool = False
 
         self._key_column = None
 
-        # Dict of revert tables view as revert table as key and set of db
-        # columns as values
-        self.revert_foreign_tables: Dict[DBTable, Set[DBColumn]] = (
-            defaultdict(set)
-        )
+        # Словарь обратных таблиц, где ключ - обратная таблица,
+        # а значения - множество колонок базы данных
+        self.revert_foreign_tables: Dict[DBTable, Set[DBColumn]] = defaultdict(set)
 
-        # Pks of table for transferring
+        # Первичные ключи таблицы для переноса
         self.need_transfer_pks = set()
 
         self.transferred_pks_count = 0
 
     def __repr__(self):
+        """Получение строкового представления таблицы для отладки.
+
+        Returns:
+            str: Строка с именем таблицы и количеством колонок
+        """
         return (
             f'<{self.__class__.__name__} @name="{self.name}" '
             f'@with_fk="{self.with_fk}" '
@@ -444,48 +530,85 @@ class DBTable(object):
         )
 
     def __str__(self):
+        """Получение строкового представления таблицы.
+
+        Returns:
+            str: Имя таблицы с дополнительной информацией
+        """
         return self.__repr__()
 
     def __eq__(self, other):
+        """Сравнение таблиц.
+
+        Args:
+            other: Другая таблица для сравнения
+
+        Returns:
+            bool: True, если таблицы имеют одинаковые имена
+        """
         return self.name == other.name
 
     def __hash__(self):
+        """Получение хэша таблицы.
+
+        Returns:
+            int: Хэш имени таблицы
+        """
         return hash(self.name)
 
     @property
     @lru_cache()
     def primary_key(self):
-        # При обнаружении первичного ключа необходимо исключать поля с типом Дата. Это необходимо, до тех пор, пока не
-        # будет поддержки составных первичных ключей
-        primary_keys = list(
+        """Получение первичного ключа таблицы.
+
+        Возвращает первую колонку с ограничением PRIMARY KEY,
+        исключая колонки с типом данных DATE. Это необходимо, до тех пор, пока не
+        будет поддержки составных первичных ключей
+
+        Returns:
+            DBColumn: Колонка первичного ключа или None
+        """
+        primary_key_columns = list(
             filter(
                 lambda c: ConstraintTypesEnum.PRIMARY_KEY in c.constraint_type and c.data_type != 'date',
                 self.columns.values(),
             )
         )
 
-        if primary_keys:
-            return primary_keys[0]
+        if primary_key_columns:
+            return primary_key_columns[0]
 
     @property
     def is_ready_for_transferring(self) -> bool:
-        """
-        Table is ready for transferring
+        """Проверка готовности таблицы к переносу данных.
+
+        Returns:
+            bool: True, если таблица готова к переносу
         """
         return self._is_ready_for_transferring
 
     @is_ready_for_transferring.setter
     def is_ready_for_transferring(self, is_ready_for_transferring):
+        """Установка флага готовности таблицы к переносу.
+
+        Args:
+            is_ready_for_transferring: Новое значение флага
+        """
         self._is_ready_for_transferring = is_ready_for_transferring
 
     @property
     def is_full_prepared(self):
+        """Проверка готовности таблицы к переносу данных.
+
+        Returns:
+            bool: True, если таблица готова к переносу
+        """
         logger.debug(
             f'table - {self.name} -- count table records {self.full_count} and '
             f'need transfer pks {len(self.need_transfer_pks)}'
         )
 
-        if len(self.need_transfer_pks) >= self.full_count - self.inaccuracy_count:  # noqa
+        if len(self.need_transfer_pks) >= self.full_count - self.inaccuracy_count:
             logger.info(f'table {self.name} full transferred')
 
             return True
@@ -493,84 +616,146 @@ class DBTable(object):
     @property
     @lru_cache()
     def with_fk(self):
+        """Проверка наличия внешних ключей в таблице.
+
+        Returns:
+            bool: True, если таблица имеет внешние ключи
+        """
         return bool(self.foreign_keys_columns)
 
     @property
     @lru_cache()
     def key_column(self):
+        """Получение ключевой колонки таблицы.
+
+        Returns:
+            DBColumn: Ключевая колонка или None
+        """
         return self._key_column
 
     @property
     @lru_cache()
     def with_key_column(self):
-        return bool(self._key_column)
+        """Проверка наличия ключевой колонки в таблице.
+
+        Returns:
+            bool: True, если таблица имеет ключевую колонку
+        """
+        return bool(self.key_column)
 
     @property
     @lru_cache()
     def with_self_fk(self):
+        """Проверка наличия внешних ключей, ссылающихся на эту же таблицу.
+
+        Returns:
+            bool: True, если таблица имеет самоссылающиеся внешние ключи
+        """
         return bool(self.self_fk_columns)
 
     @property
     @lru_cache()
     def with_not_self_fk(self):
+        """Проверка наличия внешних ключей, ссылающихся на другие таблицы.
+
+        Returns:
+            bool: True, если таблица имеет внешние ключи на другие таблицы
+        """
         return bool(self.not_self_fk_columns)
 
     @property
     @lru_cache()
     def unique_fk_columns(self) -> List['DBColumn']:
-        return list(filter(
-            lambda c: c.is_foreign_key and c.is_unique,
-            self.not_self_fk_columns
-        ))
+        """Получение уникальных внешних ключей таблицы.
+
+        Returns:
+            List[DBColumn]: Список колонок с уникальными внешними ключами
+        """
+        return list(
+            filter(
+                lambda column: column.is_foreign_key and column.is_unique,
+                self.not_self_fk_columns,
+            )
+        )
 
     @property
     @lru_cache()
     def foreign_keys_columns(self):
-        return list(filter(lambda c: c.is_foreign_key, self.columns.values()))
+        """Получение всех колонок с внешними ключами.
+
+        Returns:
+            List[DBColumn]: Список колонок с внешними ключами
+        """
+        return list(
+            filter(
+                lambda column: column.is_foreign_key,
+                self.columns.values(),
+            )
+        )
 
     @property
     @lru_cache()
     def self_fk_columns(self):
-        return list(filter(lambda c: c.is_self_fk, self.columns.values()))
+        """Получение колонок с внешними ключами, ссылающимися на эту же таблицу.
+
+        Returns:
+            List[DBColumn]: Список самоссылающихся колонок
+        """
+        return list(
+            filter(
+                lambda column: column.is_self_fk,
+                self.columns.values(),
+            )
+        )
 
     @property
     @lru_cache()
     def not_self_fk_columns(self) -> List['DBColumn']:
+        """Получение колонок с внешними ключами, ссылающимися на другие таблицы.
+
+        Returns:
+            List[DBColumn]: Список колонок с внешними ключами на другие таблицы
+        """
         return list(
             filter(
                 lambda c: c.is_foreign_key and not c.is_self_fk,
-                self.columns.values()
+                self.columns.values(),
             )
         )
 
     @property
     @lru_cache()
     def fk_columns_with_key_column(self) -> List['DBColumn']:
+        """Получение колонок с внешними ключами на таблицы с ключевой колонкой.
+
+        Returns:
+            List[DBColumn]: Список колонок с внешними ключами на таблицы с ключевой колонкой
+        """
         return list(
             filter(
-                lambda c: c.constraint_table.with_key_column,
-                self.not_self_fk_columns
+                lambda column: column.constraint_table.with_key_column,
+                self.not_self_fk_columns,
             )
         )
 
     @property
     @lru_cache()
     def unique_fk_columns_with_key_column(self) -> List['DBColumn']:
+        """Получение уникальных внешних ключей на таблицы с ключевой колонкой.
+
+        Returns:
+            List[DBColumn]: Список уникальных колонок с внешними ключами на таблицы с ключевой колонкой
         """
-        Return unique foreign key columns to tables with key column
-        """
-        return list(
-            set(
-                self.unique_fk_columns
-            ).intersection(self.fk_columns_with_key_column)
-        )
+        return list(set(self.unique_fk_columns).intersection(self.fk_columns_with_key_column))
 
     @property
     @lru_cache
     def fk_columns_tables_with_fk_columns_with_key_column(self) -> List['DBColumn']:
-        """
-        Return a list of foreign key columns to tables with foreign key
-        columns to table with key columns
+        """Получение внешних ключей на таблицы, которые имеют внешние ключи на таблицы с ключевой колонкой.
+
+        Returns:
+            List[DBColumn]: Список колонок с внешними ключами на таблицы,
+                          имеющие внешние ключи на таблицы с ключевой колонкой
         """
         columns = []
 
@@ -586,14 +771,16 @@ class DBTable(object):
     @property
     @lru_cache
     def unique_fk_columns_tables_with_fk_columns_with_key_column(self) -> List['DBColumn']:
-        """
-        Return a list of unique foreign key columns to tables with foreign key
-        columns to table with key columns
+        """Получение уникальных внешних ключей на таблицы, которые имеют внешние ключи на таблицы с ключевой колонкой.
+
+        Returns:
+            List[DBColumn]: Список уникальных колонок с внешними ключами на таблицы,
+                          имеющие внешние ключи на таблицы с ключевой колонкой
         """
         columns = []
 
         for column in self.unique_fk_columns:
-            constraint_table_fk_columns = column.constraint_table.not_self_fk_columns  # noqa
+            constraint_table_fk_columns = column.constraint_table.not_self_fk_columns
 
             for constraint_column in constraint_table_fk_columns:
                 if constraint_column.constraint_table.with_key_column:
@@ -603,17 +790,35 @@ class DBTable(object):
 
     @property
     def is_checked(self) -> bool:
+        """Проверка статуса проверки таблицы.
+
+        Returns:
+            bool: True, если таблица была проверена
+        """
         return self._is_checked
 
     @is_checked.setter
     def is_checked(self, value):
+        """Установка статуса проверки таблицы.
+
+        Args:
+            value: Новое значение статуса проверки
+        """
         self._is_checked = value
 
     @property
     @lru_cache()
     def highest_priority_fk_columns(self) -> List['DBColumn']:
-        """
-        Return highest priority foreign key columns
+        """Получение внешних ключей с наивысшим приоритетом.
+
+        Приоритет определяется в следующем порядке:
+        1. Уникальные внешние ключи на таблицы с ключевой колонкой
+        2. Уникальные внешние ключи на таблицы с внешними ключами на таблицы с ключевой колонкой
+        3. Внешние ключи на таблицы с ключевой колонкой
+        4. Внешние ключи на таблицы с внешними ключами на таблицы с ключевой колонкой
+
+        Returns:
+            List[DBColumn]: Список колонок с наивысшим приоритетом
         """
         if self.unique_fk_columns_with_key_column:
             fk_columns = self.unique_fk_columns_with_key_column
@@ -634,8 +839,10 @@ class DBTable(object):
         self,
         need_transfer_pks: Iterable[Union[int, str]],
     ):
-        """
-        Updating table need transfer pks
+        """Обновление множества идентификаторов записей для переноса.
+
+        Args:
+            need_transfer_pks: Итерируемый объект с идентификаторами для переноса
         """
         self.need_transfer_pks.update(need_transfer_pks)
 
@@ -649,6 +856,18 @@ class DBTable(object):
         constraint_table: Optional['DBTable'],
         constraint_type: str,
     ):
+        """Добавление колонки в таблицу.
+
+        Args:
+            column_name: Имя колонки
+            data_type: Тип данных колонки
+            ordinal_position: Позиция колонки в таблице
+            constraint_table: Таблица, на которую ссылается внешний ключ
+            constraint_type: Тип ограничения колонки
+
+        Returns:
+            None
+        """
         if column_name in self.columns:
             column: DBColumn = await self.get_column_by_name(column_name)
 
@@ -681,20 +900,15 @@ class DBTable(object):
             try:
                 column.constraint_table.revert_foreign_tables[self].add(column)
             except AttributeError:
-                traceback_ = "\n".join(traceback.format_stack())
-                message = (
-                    f'Wrong foreign key column {column}.\n'
-                    f'{traceback_}'
-                )
+                traceback_ = '\n'.join(traceback.format_stack())
+                message = f'Wrong foreign key column {column}.\n{traceback_}'
 
                 raise AttributeError(message)
 
         return column
 
     async def get_column_by_name(self, column_name):
-        """
-        Get table column by name
-        """
+        """Get table column by name."""
         return self.columns.get(column_name)
 
     def get_columns_by_constraint_types_table_name(
@@ -702,33 +916,44 @@ class DBTable(object):
         table_name: str,
         constraint_types: Optional[Iterable[str]] = None,
     ) -> List['DBColumn']:
-        """
-        Get foreign columns by constraint types and table name
+        """Получение колонок по имени таблицы ограничения и типам ограничений.
+
+        Args:
+            table_name: Имя таблицы ограничения
+            constraint_types: Список типов ограничений для фильтрации
+
+        Returns:
+            List[DBColumn]: Список колонок, удовлетворяющих условиям
         """
         return list(
             filter(
                 lambda c: (
-                    deep_getattr(c.constraint_table, 'name') == table_name and (
-                        set(c.constraint_type).intersection(
-                            set(constraint_types)
-                        ) if
-                        constraint_types else
-                        True
-                    )
+                    deep_getattr(c.constraint_table, 'name') == table_name
+                    and (set(c.constraint_type).intersection(set(constraint_types)) if constraint_types else True)
                 ),
                 self.columns.values(),
             )
         )
 
     def get_columns_list_str_commas(self):
+        """Получение списка имен колонок через запятую.
+
+        Returns:
+            str: Строка с именами колонок в кавычках, разделенными запятыми
+        """
         return ', '.join(
             map(
                 lambda c: f'"{c.name}"',
                 sorted(self.columns.values(), key=lambda c: c.ordinal_position),
             )
-        )  # noqa
+        )
 
     def get_columns_list_with_types_str_commas(self):
+        """Получение списка колонок с их типами через запятую.
+
+        Returns:
+            str: Строка с именами колонок и их типами, разделенными запятыми
+        """
         return ', '.join(
             map(
                 lambda c: f'"{c.name}" {c.data_type}',
@@ -737,6 +962,14 @@ class DBTable(object):
         )
 
     async def set_max_sequence(self, dst_pool: Pool):
+        """Установка максимального значения последовательности для первичного ключа.
+
+        Args:
+            dst_pool: Пул соединений с базой данных
+
+        Returns:
+            None
+        """
         async with dst_pool.acquire() as connection:
             try:
                 get_serial_sequence_sql = SQLRepository.get_serial_sequence_sql(
@@ -744,31 +977,37 @@ class DBTable(object):
                     pk_column_name=self.primary_key.name,
                 )
             except AttributeError:
-                logger.warning(
-                    f'AttributeError --- {self.name} --- set_max_sequence'
-                )
+                logger.warning(f'AttributeError --- {self.name} --- {get_serial_sequence_sql} --- set_max_sequence')
                 return
 
-            serial_seq_name = await connection.fetchrow(
-                get_serial_sequence_sql
-            )
+            try:
+                serial_seq_name = await connection.fetchrow(get_serial_sequence_sql)
+            except InvalidNameError:
+                logger.error(f'InvalidNameError --- {self.name} --- {get_serial_sequence_sql} --- set_max_sequence')
+                return
 
             if serial_seq_name and serial_seq_name[0]:
                 serial_seq_name = serial_seq_name[0]
 
                 max_val = self.max_pk + 100000
 
-                set_sequence_val_sql = (
-                    SQLRepository.get_set_sequence_value_sql(
-                        seq_name=serial_seq_name,
-                        seq_val=max_val,
-                    )
+                set_sequence_val_sql = SQLRepository.get_set_sequence_value_sql(
+                    seq_name=serial_seq_name,
+                    seq_val=max_val,
                 )
 
                 await connection.execute(set_sequence_val_sql)
 
 
 class DBColumn(object):
+    """Класс для работы с колонкой таблицы базы данных.
+
+    Предоставляет методы для:
+    - Управления типами данных и ограничениями
+    - Проверки типов ограничений (первичный ключ, внешний ключ, уникальность)
+    - Работы с внешними ключами и ссылками на другие таблицы
+    """
+
     __slots__ = (
         'name',
         'table_name',
@@ -787,7 +1026,16 @@ class DBColumn(object):
         constraint_table: Optional[DBTable] = None,
         constraint_type: Optional[str] = None,
     ):
+        """Инициализация колонки.
 
+        Args:
+            column_name: Имя колонки
+            table_name: Имя таблицы, которой принадлежит колонка
+            data_type: Тип данных колонки
+            ordinal_position: Позиция колонки в таблице
+            constraint_table: Таблица, на которую ссылается внешний ключ
+            constraint_type: Тип ограничения колонки.
+        """
         assert column_name, None
         assert table_name, None
 
@@ -802,6 +1050,11 @@ class DBColumn(object):
             self.constraint_type.append(constraint_type)
 
     def __repr__(self):
+        """Получение строкового представления колонки для отладки.
+
+        Returns:
+            str: Строка с информацией о колонке
+        """
         return (
             f'< {self.__class__.__name__} @name="{self.name}" '
             f'@table_name="{self.table_name}" '
@@ -811,46 +1064,79 @@ class DBColumn(object):
             f'@foreign_table_name="{deep_getattr(self.constraint_table, "name", " - ")}" '
             f'@constraint_types="{make_str_from_iterable(self.constraint_type)}">'
         )
-    
+
     def __str__(self):
+        """Получение строкового представления колонки.
+
+        Returns:
+            str: Имя колонки c информацией о колонке
+        """
         return self.__repr__()
 
     @property
     @lru_cache()
     def is_foreign_key(self):
+        """Проверка, является ли колонка внешним ключом.
+
+        Returns:
+            bool: True, если колонка является внешним ключом
+        """
         return ConstraintTypesEnum.FOREIGN_KEY in self.constraint_type
 
     @property
     @lru_cache()
     def is_primary_key(self):
+        """Проверка, является ли колонка первичным ключом.
+
+        Returns:
+            bool: True, если колонка является первичным ключом
+        """
         return ConstraintTypesEnum.PRIMARY_KEY in self.constraint_type
 
     @property
     @lru_cache()
     def is_unique(self):
-        return (
-            ConstraintTypesEnum.UNIQUE in self.constraint_type or (
-                self.is_foreign_key and self.is_primary_key
-            )
-        )
+        """Проверка, является ли колонка уникальной.
+
+        Returns:
+            bool: True, если колонка имеет ограничение уникальности
+        """
+        return ConstraintTypesEnum.UNIQUE in self.constraint_type or (self.is_foreign_key and self.is_primary_key)
 
     @property
     @lru_cache()
     def is_key_column(self):
-        return (
-            self.name in KEY_COLUMN_NAMES or
-            deep_getattr(self.constraint_table, 'name') == KEY_TABLE_NAME  # noqa
-        )
+        """Проверка, является ли колонка ключевой.
+
+        Returns:
+            bool: True, если имя колонки входит в список KEY_COLUMN_NAMES
+        """
+        return self.name in KEY_COLUMN_NAMES or deep_getattr(self.constraint_table, 'name') == KEY_TABLE_NAME
 
     @property
     def is_self_fk(self):
-        return (
-            self.is_foreign_key and 
-            deep_getattr(self.constraint_table, 'name') == self.table_name
-        )
+        """Проверка, является ли колонка самоссылающимся внешним ключом.
+
+        Returns:
+            bool: True, если колонка ссылается на свою же таблицу
+        """
+        return self.is_foreign_key and deep_getattr(self.constraint_table, 'name') == self.table_name
 
     def get_column_name_with_type(self):
+        """Получение строки с именем колонки и ее типом данных.
+
+        Returns:
+            str: Строка вида '"column_name" data_type'
+        """
         return f'{self.name} {self.data_type}'
 
     async def add_constraint_type(self, constraint_type):
+        """Добавление типа ограничения к колонке.
+
+        Args:
+            constraint_type: Тип ограничения для добавления
+
+        Returns:
+            None
+        """
         self.constraint_type.append(constraint_type)

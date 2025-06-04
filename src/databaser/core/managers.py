@@ -15,6 +15,7 @@ import asyncpg
 import uvloop
 from asyncpg import (
     UndefinedFunctionError,
+    UndefinedTableError,
 )
 
 from databaser.core.collectors import (
@@ -76,15 +77,19 @@ from databaser.settings import (
 
 
 class DatabaserManager:
-    """
-    Databaser manager
-    """
+    """Менеджер для управления процессом переноса данных между базами данных."""
 
     def __init__(
         self,
         *args,
         **kwargs,
     ):
+        """Инициализация менеджера.
+
+        Args:
+            *args: Дополнительные позиционные аргументы
+            **kwargs: Дополнительные именованные аргументы
+        """
         self._src_db_connection_parameters = DBConnectionParameters(
             host=SRC_DB_HOST,
             port=SRC_DB_PORT,
@@ -122,29 +127,36 @@ class DatabaserManager:
         key_table_primary_key_name: str,
         key_table_primary_key_value: int,
     ):
-        """
-        Get hierarchy of key table records by parent_id
+        """Получение иерархии записей ключевой таблицы по родительскому идентификатору.
+
+        Args:
+            key_table_primary_key_name: Название первичного ключа в ключевой таблице
+            key_table_primary_key_value: Значение первичного ключа для поиска иерархии
+
+        Returns:
+            None. Обновляет внутреннее множество self._key_column_values
         """
         async with self._src_database.connection_pool.acquire() as connection:
+            # ruff: noqa: E501, S608
             get_key_table_parents_values_sql = f"""
                 with recursive hierarchy("{key_table_primary_key_name}", "{KEY_TABLE_HIERARCHY_COLUMN_NAME}", "level") as (
-                    select "{KEY_TABLE_NAME}"."{key_table_primary_key_name}", 
-                        "{KEY_TABLE_NAME}"."{KEY_TABLE_HIERARCHY_COLUMN_NAME}", 
-                        0 
-                    from "{KEY_TABLE_NAME}" 
+                    select "{KEY_TABLE_NAME}"."{key_table_primary_key_name}",
+                        "{KEY_TABLE_NAME}"."{KEY_TABLE_HIERARCHY_COLUMN_NAME}",
+                        0
+                    from "{KEY_TABLE_NAME}"
                     where "{KEY_TABLE_NAME}"."{key_table_primary_key_name}" = {key_table_primary_key_value}
-        
+
                     union all
-        
+
                     select
                         "{KEY_TABLE_NAME}"."{key_table_primary_key_name}",
                         "{KEY_TABLE_NAME}"."{KEY_TABLE_HIERARCHY_COLUMN_NAME}",
                         "hierarchy"."level" + 1
-                    from "{KEY_TABLE_NAME}" 
+                    from "{KEY_TABLE_NAME}"
                     join "hierarchy" on "{KEY_TABLE_NAME}"."{key_table_primary_key_name}" = "hierarchy"."{KEY_TABLE_HIERARCHY_COLUMN_NAME}"
                 )
-                select "{KEY_TABLE_NAME}"."{key_table_primary_key_name}" {key_table_primary_key_name} 
-                from "{KEY_TABLE_NAME}" 
+                select "{KEY_TABLE_NAME}"."{key_table_primary_key_name}" {key_table_primary_key_name}
+                from "{KEY_TABLE_NAME}"
                 join "hierarchy" on "{KEY_TABLE_NAME}"."{key_table_primary_key_name}" = "hierarchy"."{key_table_primary_key_name}"
                 where "{KEY_TABLE_NAME}"."{key_table_primary_key_name}" <> {key_table_primary_key_value}
                 order by "hierarchy"."level" desc;
@@ -152,20 +164,16 @@ class DatabaserManager:
 
             records = await connection.fetch(get_key_table_parents_values_sql)
 
-            self._key_column_values.update(
-                [
-                    record.get('id')
-                    for record in records
-                ]
-            )
+            self._key_column_values.update([record.get('id') for record in records])
 
             del get_key_table_parents_values_sql
 
     async def _build_key_column_values_hierarchical_structure(self):
+        """Построение дерева иерархии записей ключевой таблицы по колонке parent_id.
+
+        Обновляет внутреннее множество self._key_column_values, добавляя все родительские записи.
         """
-        Building tree of hierarchy key table records by parent_id column
-        """
-        logger.info("build tree of enterprises for transfer process")
+        logger.info('build tree of enterprises for transfer process')
 
         key_table: DBTable = self._dst_database.tables.get(KEY_TABLE_NAME)
         hierarchy_column = await key_table.get_column_by_name(
@@ -186,60 +194,55 @@ class DatabaserManager:
             if coroutines:
                 await asyncio.wait(coroutines)
 
-        logger.info(
-            f"transferring enterprises - "
-            f"{make_str_from_iterable(self._key_column_values, with_quotes=True)}"  # noqa
-        )
+        logger.info(f'transferring enterprises - {make_str_from_iterable(self._key_column_values, with_quotes=True)}')
 
     async def _set_table_counters(self, table_name: str):
-        """
-        Filling table max pk and count of records
+        """Заполнение максимального значения первичного ключа и количества записей в таблице.
+
+        Args:
+            table_name: Название таблицы
+
+        Raises:
+            AttributeError: Если у таблицы отсутствует первичный ключ
+            UndefinedFunctionError: Если не найдена необходимая функция в базе данных
         """
         async with self._src_database.connection_pool.acquire() as connection:
             table = self._dst_database.tables[table_name]
 
             try:
-                count_table_records_sql = (
-                    SQLRepository.get_count_table_records(
-                        primary_key=table.primary_key,
-                    )
+                count_table_records_sql = SQLRepository.get_count_table_records(
+                    primary_key=table.primary_key,
                 )
             except AttributeError as e:
-                logger.warning(
-                    f'{str(e)} --- _set_table_counters {"-"*10} - '
-                    f"{table.name}"
-                )
-                raise AttributeError
-            except UndefinedFunctionError:
-                raise UndefinedFunctionError
+                logger.error(f'{str(e)} --- _set_table_counters {"-" * 10} - {table.name}')
+                raise e
 
-            res = await connection.fetchrow(count_table_records_sql)
+            try:
+                res = await connection.fetchrow(count_table_records_sql)
+            except (UndefinedTableError, UndefinedFunctionError) as e:
+                logger.error(f'{str(e)} --- _set_table_counters {"-" * 10} - {table.name}')
+                raise e
 
             if res and res[0] and res[1]:
-                logger.debug(
-                    f"table {table_name} with full count {res[0]}, "
-                    f"max pk - {res[1]}"
-                )
+                logger.debug(f'table {table_name} with full count {res[0]}, max pk - {res[1]}')
 
                 table.full_count = int(res[0])
 
-                table.max_pk = (
-                    int(res[1])
-                    if isinstance(res[1], int)
-                    else table.full_count + 100000
-                )
+                table.max_pk = int(res[1]) if isinstance(res[1], int) else table.full_count + 100000
 
             del count_table_records_sql
 
     async def _set_tables_counters(self):
-        logger.info(
-            'start filling tables max pk and count of records..'
-        )
+        """Заполнение счетчиков для всех таблиц.
+
+        Асинхронно обрабатывает все таблицы и устанавливает для каждой:
+        - Максимальное значение первичного ключа
+        - Общее количество записей
+        """
+        logger.info('start filling tables max pk and count of records..')
 
         coroutines = [
-            asyncio.create_task(
-                self._set_table_counters(table_name)
-            )
+            asyncio.create_task(self._set_table_counters(table_name))
             for table_name in sorted(self._dst_database.tables.keys())
         ]
 
@@ -249,8 +252,15 @@ class DatabaserManager:
         logger.info('finished filling tables max pk and count of records.')
 
     async def _main(self):
-        """
-        Run async databaser
+        """Основной метод для запуска процесса переноса данных.
+
+        Выполняет следующие действия:
+        1. Устанавливает соединения с базами данных
+        2. Строит иерархию записей ключевой таблицы
+        3. Собирает информацию о структуре таблиц
+        4. Проверяет и подготавливает таблицы к переносу
+        5. Выполняет перенос данных
+        6. Закрывает соединения
         """
         async with asyncpg.create_pool(
             self._dst_database.connection_str,
@@ -267,10 +277,7 @@ class DatabaserManager:
 
                 await self._src_database.prepare_table_names()
 
-                logger.info(
-                    f'src_database tables count - '
-                    f'{len(self._src_database.table_names)}'
-                )
+                logger.info(f'src_database tables count - {len(self._src_database.table_names)}')
 
                 fdw_wrapper = PostgresFDWExtensionWrapper(
                     src_database=self._src_database,
@@ -279,17 +286,13 @@ class DatabaserManager:
                 )
                 await asyncio.wait(
                     [
-                        asyncio.create_task(
-                            fdw_wrapper.disable()
-                        ),
+                        asyncio.create_task(fdw_wrapper.disable()),
                     ]
                 )
 
                 await asyncio.wait(
                     [
-                        asyncio.create_task(
-                            self._dst_database.prepare_partition_names()
-                        ),
+                        asyncio.create_task(self._dst_database.prepare_partition_names()),
                     ]
                 )
 
@@ -307,9 +310,7 @@ class DatabaserManager:
 
                 await asyncio.wait(
                     [
-                        asyncio.create_task(
-                            self._build_key_column_values_hierarchical_structure()  # noqa
-                        ),
+                        asyncio.create_task(self._build_key_column_values_hierarchical_structure()),
                     ]
                 )
                 async with statistic_indexer(
@@ -320,9 +321,7 @@ class DatabaserManager:
 
                 await asyncio.wait(
                     [
-                        asyncio.create_task(
-                            fdw_wrapper.enable()
-                        ),
+                        asyncio.create_task(fdw_wrapper.enable()),
                     ]
                 )
 
@@ -340,9 +339,7 @@ class DatabaserManager:
                 )
                 await asyncio.wait(
                     [
-                        asyncio.create_task(
-                            collector_manager.manage()
-                        ),
+                        asyncio.create_task(collector_manager.manage()),
                     ]
                 )
 
@@ -359,9 +356,7 @@ class DatabaserManager:
                 ):
                     await asyncio.wait(
                         [
-                            asyncio.create_task(
-                                transporter.transfer()
-                            ),
+                            asyncio.create_task(transporter.transfer()),
                         ]
                     )
 
@@ -369,9 +364,7 @@ class DatabaserManager:
 
                 await asyncio.wait(
                     [
-                        asyncio.create_task(
-                            fdw_wrapper.disable()
-                        ),
+                        asyncio.create_task(fdw_wrapper.disable()),
                     ]
                 )
 
@@ -389,6 +382,10 @@ class DatabaserManager:
                     await validator_manager.validate()
 
     def manage(self):
+        """Запуск процесса переноса данных.
+
+        Инициализирует событийный цикл asyncio и запускает основной метод _main.
+        """
         start = datetime.now()
         logger.info(f'date start - {start}')
 
@@ -399,22 +396,25 @@ class DatabaserManager:
         )
 
         finish = datetime.now()
-        logger.info(
-            f'dates start - {start}, finish - {finish}, spend time - '
-            f'{finish - start}'
-        )
+        logger.info(f'dates start - {start}, finish - {finish}, spend time - {finish - start}')
 
 
 class CollectorManager:
+    """Менеджер для сбора записей таблиц для переноса данных.
+
+    Отвечает за:
+    - Координацию работы различных сборщиков данных
+    - Последовательное выполнение этапов сбора данных
+    - Обработку исключений при сборе данных
     """
-    Manager of collectors tables records for transferring
-    """
+
     collectors_classes: List[Type[BaseCollector]] = [
         KeyTableCollector,
         FullTransferCollector,
         TablesWithKeyColumnSiblingsCollector,
         SortedByDependencyTablesCollector,
         GenericTablesCollector,
+        FullTransferCollector,
     ]
 
     def __init__(
@@ -424,12 +424,21 @@ class CollectorManager:
         statistic_manager: StatisticManager,
         key_column_values: Set[int],
     ):
-        self._dst_database = dst_database
+        """Инициализация менеджера сборщиков.
+
+        Args:
+            src_database: Исходная база данных
+            dst_database: Целевая база данных
+            statistic_manager: Менеджер статистики
+            key_column_values: Множество значений ключевой колонки
+        """
         self._src_database = src_database
-        self._key_column_values = key_column_values
+        self._dst_database = dst_database
         self._statistic_manager = statistic_manager
+        self._key_column_values = key_column_values
 
     async def manage(self):
+        """Запуск процесса сбора данных."""
         for collector_class in self.collectors_classes:
             collector = collector_class(
                 src_database=self._src_database,
@@ -437,5 +446,4 @@ class CollectorManager:
                 statistic_manager=self._statistic_manager,
                 key_column_values=self._key_column_values,
             )
-
             await collector.collect()
