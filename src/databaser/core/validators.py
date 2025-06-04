@@ -35,9 +35,7 @@ from databaser.core.loggers import (
 
 
 class BaseValidator(metaclass=ABCMeta):
-    """
-    Base class for creating validators
-    """
+    """Базовый класс для создания валидаторов данных."""
 
     def __init__(
         self,
@@ -46,6 +44,14 @@ class BaseValidator(metaclass=ABCMeta):
         statistic_manager: StatisticManager,
         key_column_values: Set[int],
     ):
+        """Инициализация базового валидатора.
+
+        Args:
+            dst_database: Целевая база данных
+            src_database: Исходная база данных
+            statistic_manager: Менеджер статистики
+            key_column_values: Множество значений ключевой колонки
+        """
         self._dst_database = dst_database
         self._src_database = src_database
         self._statistic_manager = statistic_manager
@@ -53,28 +59,32 @@ class BaseValidator(metaclass=ABCMeta):
 
     @abstractmethod
     async def validate(self) -> Tuple[bool, str]:
-        """
-        Method for data validation
+        """Метод для валидации данных.
+
+        Returns:
+            Tuple[bool, str]: Кортеж из флага валидности и сообщения
         """
 
 
 class TablesWithKeyColumnValidator(BaseValidator):
-    """
-    Validating data of tables with key column
-    """
+    """Валидатор данных для таблиц с ключевой колонкой."""
 
-    GET_TABLE_KEY_COLUMN_IDS_SQL = (
-        """
+    GET_TABLE_KEY_COLUMN_IDS_SQL = """
         SELECT DISTINCT "{key_column_name}"
         FROM "{table_name}";
         """
-    )
 
     def __init__(
         self,
         *args,
         **kwargs,
     ):
+        """Инициализация валидатора таблиц с ключевой колонкой.
+
+        Args:
+            *args: Позиционные аргументы для базового класса
+            **kwargs: Именованные аргументы для базового класса
+        """
         super().__init__(
             *args,
             **kwargs,
@@ -86,8 +96,13 @@ class TablesWithKeyColumnValidator(BaseValidator):
         self,
         table: DBTable,
     ):
-        """
-        Validating table key column values
+        """Валидация значений ключевой колонки в таблице.
+
+        Args:
+            table: Таблица для валидации
+
+        Returns:
+            None. Добавляет сообщения об ошибках в self._validation_result
         """
         get_table_key_column_ids_sql = self.GET_TABLE_KEY_COLUMN_IDS_SQL.format(
             key_column_name=table.key_column.name,
@@ -100,10 +115,7 @@ class TablesWithKeyColumnValidator(BaseValidator):
             )
 
         if key_column_ids_records:
-            key_column_ids = {
-                str(record.get(table.key_column.name))
-                for record in key_column_ids_records
-            }
+            key_column_ids = {str(record.get(table.key_column.name)) for record in key_column_ids_records}
 
             difference = key_column_ids.difference(self._key_column_ids)
 
@@ -119,6 +131,11 @@ class TablesWithKeyColumnValidator(BaseValidator):
                 )
 
     async def validate(self):
+        """Валидация всех таблиц с ключевой колонкой.
+
+        Returns:
+            Tuple[bool, str]: Кортеж из флага валидности и сообщения с результатами проверки
+        """
         coroutines = [
             asyncio.create_task(
                 self._validate_table_data(
@@ -142,13 +159,9 @@ class TablesWithKeyColumnValidator(BaseValidator):
 
 
 class ValidatorManager:
-    """
-    Manager for running validators after transferring data to destination
-    database
-    """
-    validator_classes = (
-        TablesWithKeyColumnValidator,
-    )
+    """Менеджер для запуска валидаторов после переноса данных в целевую базу данных."""
+
+    validator_classes = (TablesWithKeyColumnValidator,)
 
     def __init__(
         self,
@@ -157,6 +170,14 @@ class ValidatorManager:
         statistic_manager: StatisticManager,
         key_column_values: Set[int],
     ):
+        """Инициализация менеджера валидаторов.
+
+        Args:
+            dst_database: Целевая база данных
+            src_database: Исходная база данных
+            statistic_manager: Менеджер статистики
+            key_column_values: Множество значений ключевой колонки
+        """
         self._dst_database = dst_database
         self._src_database = src_database
         self._statistic_manager = statistic_manager
@@ -165,18 +186,12 @@ class ValidatorManager:
         self._validation_result: Dict[str, Tuple[bool, str]] = {}
 
     def _print_result(self):
-        """
-        Print validation result
-        """
+        """Вывод результатов валидации в виде таблицы."""
         result_table = PrettyTable()
 
-        result_table.field_names = [
-            'Validator',
-            'Is valid',
-            'Message'
-        ]
+        result_table.field_names = ['Validator', 'Is valid', 'Message']
 
-        for validator_class_name, (is_valid, message) in self._validation_result.items():  # noqa
+        for validator_class_name, (is_valid, message) in self._validation_result.items():
             result_table.add_row(
                 (
                     validator_class_name,
@@ -192,8 +207,14 @@ class ValidatorManager:
         validator_class: Type[BaseValidator],
         **parameters: Dict[str, Union[BaseDatabase, StatisticManager]],
     ):
-        """
-        Run validator
+        """Запуск отдельного валидатора.
+
+        Args:
+            validator_class: Класс валидатора для запуска
+            **parameters: Параметры для инициализации валидатора
+
+        Returns:
+            None. Сохраняет результаты в self._validation_result
         """
         validator = validator_class(**parameters)
 
@@ -202,8 +223,10 @@ class ValidatorManager:
         self._validation_result[validator_class.__name__] = is_valid, message
 
     async def _run_validators(self):
-        """
-        Run registered validators
+        """Запуск всех зарегистрированных валидаторов.
+
+        Returns:
+            None. Результаты сохраняются в self._validation_result
         """
         parameters = {
             'dst_database': self._dst_database,
@@ -224,14 +247,14 @@ class ValidatorManager:
             await asyncio.gather(*coroutines)
 
     async def validate(self) -> bool:
+        """Запуск процесса валидации и вывод результатов.
+
+        Returns:
+            bool: Флаг валидности
+        """
         await self._run_validators()
         self._print_result()
 
-        is_valid: bool = all(
-            [
-                item[0]
-                for item in self._validation_result.values()
-            ]
-        )
+        is_valid: bool = all([item[0] for item in self._validation_result.values()])
 
         return is_valid

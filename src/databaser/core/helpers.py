@@ -10,9 +10,6 @@ from collections import (
 from datetime import (
     datetime,
 )
-from distutils.util import (
-    strtobool,
-)
 from itertools import (
     chain,
     islice,
@@ -49,13 +46,36 @@ DBConnectionParameters = namedtuple(
 )
 
 
+def strtobool(value: str) -> bool:
+    """Преобразование строкового представления истинности в булево значение.
+
+    Args:
+        value: Строковое значение для преобразования
+
+    Returns:
+        True, если значение является одним из: 'y', 'yes', 't', 'true', 'on', '1';
+        False в противном случае.
+
+    Пример:
+        >>> strtobool('yes')
+        True
+        >>> strtobool('no')
+        False
+    """
+    value = value.lower()
+
+    if value in ('y', 'yes', 't', 'true', 'on', '1'):
+        return True
+
+    return False
+
+
 def make_str_from_iterable(
     iterable: Iterable[Any],
     with_quotes: bool = False,
     quote: str = '"',
 ) -> str:
-    """
-    Вспомогательная функция для преобразования итерируемого объекта к строке
+    """Вспомогательная функция для преобразования итерируемого объекта к строке.
 
     Args:
         iterable: итерируемый объект
@@ -79,15 +99,8 @@ def make_str_from_iterable(
 
 
 def dates_to_string(dates_list: Iterable[datetime], format_: str = '%Y-%m-%d %H:%M:%S'):
-    """
-    Преобразование дат, содержащихся в итерируемом объекте
-    """
-    return ', '.join(
-        map(
-            lambda date_: f'{date_:{format_}}',
-            dates_list
-        )
-    )
+    """Преобразование дат, содержащихся в итерируемом объекте."""
+    return ', '.join(map(lambda date_: f'{date_:{format_}}', dates_list))
 
 
 # Именованный кортеж содержащий результат работы функции топологической сортировки
@@ -97,8 +110,7 @@ Results = namedtuple('Results', ['sorted', 'cyclic'])
 def topological_sort(
     dependency_pairs: Iterable[Union[str, Tuple[str, str]]],
 ):
-    """
-    Сортировка по степени зависимости
+    """Сортировка по степени зависимости.
 
     print( topological_sort('aa'.split()) )
     print( topological_sort('ah bg cf ch di ed fb fg hd he ib'.split()) )
@@ -134,8 +146,7 @@ def make_chunks(
     size: int,
     is_list: bool = False,
 ):
-    """
-    Разделение итерируемого объекта на части указанного в параметрах размера
+    """Разделение итерируемого объекта на части указанного в параметрах размера.
 
     Args:
         iterable: итерируемый объект
@@ -146,15 +157,12 @@ def make_chunks(
 
     for first in iterator:
         yield (
-            list(chain([first], islice(iterator, size - 1))) if
-            is_list else
-            chain([first], islice(iterator, size - 1))
+            list(chain([first], islice(iterator, size - 1))) if is_list else chain([first], islice(iterator, size - 1))
         )
 
 
 def deep_getattr(object_, attribute_: str, default=None):
-    """
-    Получить значение атрибута с любого уровня цепочки вложенных объектов.
+    """Получить значение атрибута с любого уровня цепочки вложенных объектов.
 
     Args:
         object_: объект, у которого ищется значение атрибута
@@ -177,8 +185,7 @@ def get_str_environ_parameter(
     name: str,
     default: str = '',
 ) -> str:
-    """
-    Получение значения параметра из переменных окружения, имеющего строковое значение
+    """Получение значения параметра из переменных окружения, имеющего строковое значение.
 
     Args:
         name: имя переменной окружения
@@ -194,15 +201,17 @@ def get_int_environ_parameter(
     name: str,
     default: int = 0,
 ) -> int:
-    """
-    Получение значения параметра из переменных окружения, имеющего целочисленное значение
+    """Получение целочисленного значения параметра из переменных окружения.
 
     Args:
-        name: имя переменной окружения
-        default: значение по-умолчанию
+        name: Имя переменной окружения
+        default: Значение по умолчанию, если параметр не найден или не может быть преобразован в число
 
     Returns:
-        Полученное значение
+        int: Целочисленное значение параметра
+
+    Raises:
+        ValueError: Если значение параметра не может быть преобразовано в целое число
     """
     return int(os.environ.get(name, default))
 
@@ -211,15 +220,14 @@ def get_bool_environ_parameter(
     name: str,
     default: bool = False,
 ) -> bool:
-    """
-    Получение значения параметра из переменных окружения, имеющего булево значение
+    """Получение булева значения параметра из переменных окружения.
 
     Args:
-        name: имя переменной окружения
-        default: значение по-умолчанию
+        name: Имя переменной окружения
+        default: Значение по умолчанию, если параметр не найден
 
     Returns:
-        Полученное значение
+        bool: Булево значение параметра. True для значений 'y', 'yes', 't', 'true', 'on', '1'
     """
     parameter_value = os.environ.get(name)
 
@@ -236,25 +244,17 @@ def get_iterable_environ_parameter(
     separator: str = ',',
     type_=str,
 ) -> Tuple[str]:
-    """
-    Получение значения параметра из переменных окружения, имеющего строковое значение, преобразованное к кортежу
+    """Получение кортежа значений из переменной окружения.
 
     Args:
-        name: имя переменной окружения
-        default: кортеж строк
+        name: Имя переменной окружения
+        separator: Разделитель значений в строке
+        type_: Тип данных для преобразования значений
 
     Returns:
-        Полученное значение
+        Tuple[str]: Кортеж значений, преобразованных к указанному типу
     """
-    return tuple(
-        map(
-            type_,
-            filter(
-                None,
-                os.environ.get(name, '').replace(' ', '').split(separator)  
-            )
-        )
-    )
+    return tuple(map(type_, filter(None, os.environ.get(name, '').replace(' ', '').split(separator))))
 
 
 def get_extensible_iterable_environ_parameter(
@@ -262,41 +262,37 @@ def get_extensible_iterable_environ_parameter(
     separator: str = ',',
     type_=str,
 ) -> List[str]:
-    """
-    Получение значения параметра из переменных окружения, имеющего строковое значение, преобразованное к списку
+    """Получение расширяемого списка значений из переменной окружения.
 
     Args:
-        name: имя переменной окружения
-        default: список строк
+        name: Имя переменной окружения
+        separator: Разделитель значений в строке
+        type_: Тип данных для преобразования значений
 
     Returns:
-        Полученное значение
+        List[str]: Список значений, преобразованных к указанному типу
     """
-    return list(
-        map(
-            type_,
-            filter(
-                None,
-                os.environ.get(name, '').replace(' ', '').split(separator)  
-            )
-        )
-    )
+    return list(map(type_, filter(None, os.environ.get(name, '').replace(' ', '').split(separator))))
 
 
 def add_file_handler_logger(
     directory_path: str,
     file_name: str,
 ) -> None:
-    """
-    Добавление логирования в файл на диске
+    """Добавление обработчика для записи логов в файл.
 
     Args:
-        directory_path: полный путь директории с логами
-        file_name: имя файла
+        directory_path: Путь к директории для сохранения лог-файла
+        file_name: Имя лог-файла
 
+    Returns:
+        None
+
+    Raises:
+        OSError: При невозможности создать директорию или файл для логов
     """
     if directory_path:
         file_name = f'{file_name}_{uuid.uuid4().hex[:8]}'
-        fh = logging.FileHandler(f"{directory_path}/{file_name}.log")
+        fh = logging.FileHandler(f'{directory_path}/{file_name}.log')
         fh.setFormatter(formatter)
         logger.addHandler(fh)

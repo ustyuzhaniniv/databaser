@@ -1,0 +1,47 @@
+image: docker:latest
+
+variables:
+  IMAGE_NAME: "${CI_REGISTRY}/${CI_PROJECT_NAME}"
+
+stages:
+  - lint
+  - build
+  - deploy
+
+isort:
+  image: python:3.13-slim
+  stage: lint
+  before_script:
+    - pip install --no-cache-dir -e ".[dev]"
+  script:
+    - isort --check-only --diff src/
+
+ruff:
+  image: python:3.13-slim
+  stage: lint
+  before_script:
+    - pip install --no-cache-dir -e ".[dev]"
+  script:
+    - ruff check src/
+
+build:
+  stage: build
+  before_script:
+    - docker login -u "${CI_REGISTRY_USER}" -p "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY}"
+  script:
+    - docker build -t "${IMAGE_NAME}:${CI_COMMIT_SHA}" .
+    - docker tag "${IMAGE_NAME}:${CI_COMMIT_SHA}" "${IMAGE_NAME}:latest"
+  only:
+    - master
+
+deploy:
+  stage: deploy
+  before_script:
+    - docker login -u "${CI_REGISTRY_USER}" -p "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY}"
+  script:
+    - docker push "${IMAGE_NAME}:${CI_COMMIT_SHA}"
+    - docker push "${IMAGE_NAME}:latest"
+  needs:
+    - build
+  only:
+    - master

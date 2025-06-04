@@ -1,7 +1,9 @@
 class ConstraintTypesEnum(object):
-    PRIMARY_KEY = "PRIMARY KEY"
-    FOREIGN_KEY = "FOREIGN KEY"
-    UNIQUE = "UNIQUE"
+    """Перечисление типов ограничений в базе данных."""
+
+    PRIMARY_KEY = 'PRIMARY KEY'
+    FOREIGN_KEY = 'FOREIGN KEY'
+    UNIQUE = 'UNIQUE'
 
     types = [
         PRIMARY_KEY,
@@ -11,17 +13,26 @@ class ConstraintTypesEnum(object):
 
     @classmethod
     def get_types_str(cls):
-        return ", ".join(cls.types)
+        """Получение строки со всеми типами ограничений, разделенными запятой.
+
+        Returns:
+            str: Строка с типами ограничений
+        """
+        return ', '.join(cls.types)
 
     @classmethod
     def get_types_comma(cls):
-        return ", ".join(map(lambda key: f"'{key}'", cls.types))
+        """Получение строки со всеми типами ограничений в кавычках, разделенными запятой.
+
+        Returns:
+            str: Строка с типами ограничений в кавычках
+        """
+        return ', '.join(map(lambda key: f"'{key}'", cls.types))
 
 
 class DataTypesEnum:
-    """
-    Postgres data types enumerate
-    """
+    """Перечисление типов данных PostgreSQL."""
+
     SMALLINT = 'smallint'
     INTEGER = 'integer'
     BIGINT = 'bigint'
@@ -40,6 +51,8 @@ class DataTypesEnum:
 
 
 class StagesEnum:
+    """Перечисление этапов процесса переноса данных."""
+
     PREPARE_DST_DB_STRUCTURE = 1
     TRUNCATE_DST_DB_TABLES = 2
     FILLING_TABLES_ROWS_COUNTS = 3
@@ -64,6 +77,8 @@ class StagesEnum:
 
 
 class LogLevelEnum:
+    """Перечисление уровней логирования."""
+
     NOTSET = 'NOTSET'
     DEBUG = 'DEBUG'
     INFO = 'INFO'

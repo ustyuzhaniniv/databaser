@@ -35,10 +35,14 @@ from databaser.core.repositories import (
 
 
 class Transporter:
+    """Класс для комплексной транспортировки данных между базами данных.
+
+    Реализует механизм переноса данных с учетом:
+    - Внешних ключей между таблицами
+    - Таблиц с обратными связями
+    - Порционной обработки данных для оптимизации памяти
     """
-    Класс комплексной транспортировки, который использует принципы обхода по
-    внешним ключам и по таблицам с обратной связью
-    """
+
     CHUNK_SIZE = 70000
 
     def __init__(
@@ -48,6 +52,14 @@ class Transporter:
         statistic_manager: StatisticManager,
         key_column_values: Set[int],
     ):
+        """Инициализация транспортера данных.
+
+        Args:
+            dst_database: Целевая база данных
+            src_database: Исходная база данных
+            statistic_manager: Менеджер статистики
+            key_column_values: Множество значений ключевой колонки
+        """
         self._dst_database = dst_database
         self._src_database = src_database
         self.key_column_ids = key_column_values
@@ -60,13 +72,17 @@ class Transporter:
         self.content_type_table = {}
 
     async def _transfer_table_data(self, table):
+        """Перенос данных таблицы.
+
+        Разбивает данные на порции размером CHUNK_SIZE и последовательно переносит их.
+
+        Args:
+            table: Таблица для переноса данных
+
+        Returns:
+            None
         """
-        Перенос данных таблицы
-        """
-        logger.info(
-            f"start transferring table \"{table.name}\", "
-            f"need to import - {len(table.need_transfer_pks)}"
-        )
+        logger.info(f'start transferring table "{table.name}", need to import - {len(table.need_transfer_pks)}')
 
         need_import_ids_chunks = make_chunks(
             iterable=table.need_transfer_pks,
@@ -79,17 +95,25 @@ class Transporter:
                 need_import_ids_chunk=need_import_ids_chunk,
             )
 
-        logger.info(
-            f"finished transferring table \"{table.name}\""
-        )
+        logger.info(f'finished transferring table "{table.name}"')
 
     async def _transfer_chunk_table_data(
         self,
         table: DBTable,
         need_import_ids_chunk: List[Union[int, str]],
     ):
-        """
-        Порционный перенос данных таблицы в целевую БД
+        """Порционный перенос данных таблицы в целевую БД.
+
+        Args:
+            table: Таблица для переноса данных
+            need_import_ids_chunk: Список идентификаторов записей для переноса
+
+        Raises:
+            PostgresError: При возникновении ошибок в процессе переноса данных
+                (UndefinedColumnError, NotNullViolationError, PostgresSyntaxError, NumericValueOutOfRangeError)
+
+        Returns:
+            None
         """
         transfer_sql = SQLRepository.get_transfer_records_sql(
             table=table,
@@ -110,8 +134,7 @@ class Transporter:
                 NumericValueOutOfRangeError,
             ) as e:
                 raise PostgresError(
-                    f'{str(e)}, table - {table.name}, '
-                    f'sql - {transfer_sql} --- _transfer_chunk_table_data'
+                    f'{str(e)}, table - {table.name}, sql - {transfer_sql} --- _transfer_chunk_table_data'
                 )
 
         if transferred_ids:
@@ -121,58 +144,61 @@ class Transporter:
         del transferred_ids
 
     async def _transfer_collecting_data(self):
+        """Физический импорт данных в целевую БД из БД-донора.
+
+        Метод фильтрует таблицы, требующие переноса данных, и запускает
+        асинхронный процесс переноса для каждой таблицы.
+
+        Returns:
+            None
         """
-        Физический импорт данных в целевую БД из БД-донора
-        """
-        logger.info("start transferring data to target db...")
+        logger.info('start transferring data to target db...')
 
         need_imported_tables = filter(
             lambda table: table.need_transfer_pks,
             self._dst_database.tables.values(),
         )
 
-        coroutines = [
-            self._transfer_table_data(table)
-            for table in need_imported_tables
-        ]
+        coroutines = [self._transfer_table_data(table) for table in need_imported_tables]
 
         if coroutines:
             await asyncio.gather(*coroutines)
 
-        logger.info("finished transferring data to target db!")
+        logger.info('finished transferring data to target db!')
 
     async def _update_sequences(self):
+        """Обновление значений счетчиков последовательностей на максимальные.
+
+        Для каждой таблицы обновляет значения автоинкрементных последовательностей,
+        чтобы они соответствовали максимальным значениям в перенесенных данных.
+
+        Returns:
+            None
         """
-        Обновление значений счетчиков на макситальные
-        """
-        logger.info("start updating sequences...")
+        logger.info('start updating sequences...')
         await self._dst_database.set_max_tables_sequences()
-        logger.info("finished updating sequences!")
+        logger.info('finished updating sequences!')
 
     async def transfer(self):
+        """Основной метод переноса данных из БД-донора в БД-приемник.
+
+        Процесс состоит из двух основных этапов:
+        1. Перенос собранных данных
+        2. Обновление последовательностей в целевой БД
+
+        Returns:
+            None
         """
-        Переносит данный из БД донора в БД приемник
-        """
-        async with statistic_indexer(
-            self._statistic_manager,
-            StagesEnum.TRANSFERRING_COLLECTED_DATA
-        ):
+        async with statistic_indexer(self._statistic_manager, StagesEnum.TRANSFERRING_COLLECTED_DATA):
             await asyncio.wait(
                 [
-                    asyncio.create_task(
-                        self._transfer_collecting_data()
-                    ),
+                    asyncio.create_task(self._transfer_collecting_data()),
                 ]
             )
 
-        async with statistic_indexer(
-            self._statistic_manager,
-            StagesEnum.UPDATE_SEQUENCES
-        ):
+        async with statistic_indexer(self._statistic_manager, StagesEnum.UPDATE_SEQUENCES):
             await asyncio.wait(
                 [
-                    asyncio.create_task(
-                        self._update_sequences()
-                    ),
+                    asyncio.create_task(self._update_sequences()),
                 ]
             )
