@@ -1,8 +1,5 @@
 image: docker:latest
 
-variables:
-  IMAGE_NAME: "${CI_REGISTRY}/${CI_PROJECT_NAME}"
-
 stages:
   - lint
   - build
@@ -29,8 +26,8 @@ build:
   before_script:
     - docker login -u "${CI_REGISTRY_USER}" -p "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY}"
   script:
-    - docker build -t "${IMAGE_NAME}:${CI_COMMIT_SHA:0:6}" .
-    - docker tag "${IMAGE_NAME}:${CI_COMMIT_SHA:0:6}" "${IMAGE_NAME}:latest"
+    - docker build -t "${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHA:0:6}" .
+    - docker tag "${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHA:0:6}" "${CI_REGISTRY_IMAGE}:latest"
   only:
     - master
 
@@ -39,8 +36,8 @@ deploy:
   before_script:
     - docker login -u "${CI_REGISTRY_USER}" -p "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY}"
   script:
-    - docker push "${IMAGE_NAME}:${CI_COMMIT_SHA:0:6}"
-    - docker push "${IMAGE_NAME}:latest"
+    - docker push "${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHA:0:6}"
+    - docker push "${CI_REGISTRY_IMAGE}:latest"
   needs:
     - build
   only:
