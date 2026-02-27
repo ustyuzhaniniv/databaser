@@ -1,0 +1,132 @@
+[build-system]
+requires = [
+    'packaging>=24,<25',
+    'wheel>=0.45,<0.46',
+    'setuptools>=77,<78',
+    'setuptools-git-versioning>=2,<3',
+]
+
+build-backend = 'setuptools.build_meta'
+
+[project]
+name = 'databaser'
+description = 'Databaser'
+license-files = ['LICENSE']
+authors = [
+  {name = 'Danilenko Alexander', email = 'sandanilenko@gmail.com'},
+]
+readme = 'README.md'
+requires-python = '>=3.9'
+dependencies = [
+    'psutil==7.0.0',
+    'asyncpg==0.30.0',
+    'async-lru==2.0.5',
+    'prettytable==3.16.0',
+    'uvloop==0.21.0',
+]
+classifiers=[
+    'Development Status :: 5 - Production/Stable',
+    'Programming Language :: Python :: 3',
+    'Programming Language :: Python :: 3.9',
+    'Programming Language :: Python :: 3.10',
+    'Programming Language :: Python :: 3.11',
+    'Programming Language :: Python :: 3.12',
+    'Intended Audience :: Developers',
+    'Environment :: Web Environment',
+    'License :: OSI Approved :: MIT License',
+]
+dynamic = ['version']
+
+[project.urls]
+Homepage = 'https://gitflic.ru/project/sandan/databaser'
+Repository = 'https://gitflic.ru/project/sandan/databaser.git'
+
+[project.optional-dependencies]
+dev = [
+    'isort==5.12.0',
+    'ruff==0.11.2',
+    'flake8>=4.0.1,<7',
+    'pytest>=3.2.5,<8',
+    'pytest-cov<5',
+]
+docs = [
+    'sphinx>=7,<7.5',
+    'sphinx-autodoc-typehints>=2,<2.5',
+    'myst-parser>=3,<3.2',
+    'sphinx_design>=0.6,<0.7',
+]
+
+[tool.setuptools.packages.find]
+where = ['src']
+
+[tool.setuptools.package-data]
+edu_rdm_integration = ['*.py-tpl', '*.js']
+
+[tool.setuptools.exclude-package-data]
+edu_rdm_integration = ['tests', 'tests.*']
+
+[tool.setuptools-git-versioning]
+enabled = true
+
+[tool.ruff]
+target-version = "py313"
+line-length = 120
+indent-width = 4
+
+[tool.ruff.lint]
+select = ["F", "E", "D", "W", "S", "N",]
+ignore = [
+    # Missing docstring in public module
+    "D100",
+    # Missing docstring in public package
+    "D104",
+    # Missing docstring in __init__
+    "D107",
+    # 1 blank line required before class docstring
+    "D203",
+    # Multi-line docstring summary should start at the second line
+    "D213",
+    # Missing blank line after last section
+    "D413",
+    "F401",
+    "I001",
+    # use of assert detected (useless with pytest)
+    "S101",
+]
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".idea",
+    ".ipynb_checkpoints",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pyenv",
+    ".pytest_cache",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    ".vscode",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "site-packages",
+    "venv",
+]
+
+[tool.ruff.format]
+quote-style = "single"
+indent-style = "space"
+docstring-code-format = true
+
+[tool.ruff.lint.per-file-ignores]
+"*/tests/*" = ["D"]

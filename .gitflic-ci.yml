@@ -1,0 +1,44 @@
+image: docker:latest
+
+stages:
+  - lint
+  - build
+  - deploy
+
+isort:
+  image: python:3.13-slim
+  stage: lint
+  before_script:
+    - pip install --no-cache-dir -e ".[dev]"
+  script:
+    - isort --check-only --diff src/
+
+ruff:
+  image: python:3.13-slim
+  stage: lint
+  before_script:
+    - pip install --no-cache-dir -e ".[dev]"
+  script:
+    - ruff check src/
+
+build:
+  stage: build
+  before_script:
+    - docker login -u "${CI_REGISTRY_USER}" -p "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY}"
+  script:
+    - docker build -t "${CI_REGISTRY_IMAGE}/databaser:${CI_COMMIT_SHA:0:6}" .
+    - docker tag "${CI_REGISTRY_IMAGE}/databaser:${CI_COMMIT_SHA:0:6}" "${CI_REGISTRY_IMAGE}/databaser:latest"
+  only:
+    - master  
+
+deploy:
+  stage: deploy
+  before_script:
+    - docker login -u "${CI_REGISTRY_USER}" -p "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY}"
+  script:
+    - docker push "${CI_REGISTRY_IMAGE}/databaser:${CI_COMMIT_SHA:0:6}"
+    - docker push "${CI_REGISTRY_IMAGE}/databaser:latest"
+  needs:
+    - build
+  only:
+    - master
